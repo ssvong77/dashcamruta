@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camisolus Dashcam & Ruta HUD</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- FontAwesome para iconos -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            background-color: #000;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+        }
+
+        /* 1. Capa de fondo: Cámara en vivo (Dashcam) */
+        #cameraBackground {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            z-index: 1;
+            background: #000;
+        }
+
+        /* 2. Capa intermedia: Contenedor del mapa transparente flotando sobre la cámara */
+        #mapOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 2;
+            pointer-events: none; /* Permite hacer clic a través del mapa si es necesario */
+            background: transparent;
+        }
+
+        /* Interfaz flotante superior y del panel inferior */
+        .ui-layer {
+            position: relative;
+            z-index: 3;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 15px;
+            pointer-events: none; /* Dejar pasar eventos táctiles al fondo donde no haya botones */
+        }
+
+        /* Permitir clics en los elementos interactivos de la UI */
+        .interactive-ui {
+            pointer-events: auto;
+        }
+
+        .speedometer-card {
+            background: rgba(18, 18, 18, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 255, 204, 0.4);
+            border-radius: 18px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+            max-width: 360px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .speed-display {
+            font-size: 3.5rem;
+            font-weight: bold;
+            color: #00ffcc;
+            text-shadow: 0 0 15px rgba(0, 255, 204, 0.6);
+            line-height: 1;
+        }
+
+        .unit-label {
+            font-size: 1.1rem;
+            color: #aaa;
+        }
+
+        .hud-datetime-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.75rem;
+            color: #00ffcc;
+            font-family: monospace;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+            padding-bottom: 5px;
+            margin-bottom: 8px;
+            letter-spacing: 1px;
+        }
+
+        .metric-box {
+            background: rgba(42, 42, 42, 0.7);
+            border-radius: 10px;
+            padding: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Capa 1: Video de la cámara trasera -->
+    <video id="cameraBackground" autoplay playsinline muted></video>
+
+    <!-- Capa 2: Contenedor exclusivo para Google Maps (El mapa base se ocultará vía código para dejar solo la ruta) -->
+    <div id="mapOverlay"></div>
+
+    <!-- Capa 3: Interfaz de Usuario (UI) Flotante HUD -->
+    <div class="ui-layer">
+        
+        <!-- Barra Superior: Controles de inicio de cámara y GPS -->
+        <div class="d-flex justify-content-between align-items-center w-100 interactive-ui">
+            <div>
+                <button id="toggleCameraBtn" class="btn btn-sm btn-info fw-bold shadow">
+                    <i class="fa-solid fa-camera me-1"></i> Cámara Dashcam
+                </button>
+            </div>
+            <div>
+                <button id="toggleGpsBtn" class="btn btn-sm btn-success fw-bold shadow">
+                    <i class="fa-solid fa-play me-1"></i> Iniciar Ruta GPS
+                </button>
+            </div>
+        </div>
+
+        <!-- Tarjeta Central Inferior estilo HUD -->
+        <div class="interactive-ui mb-2">
+            <div class="card speedometer-card p-3 text-center">
+                
+                <!-- Fecha y Hora -->
+                <div class="hud-datetime-info">
+                    <span id="hudDateDisplay"><i class="fa-regular fa-calendar me-1"></i> --/--/----</span>
+                    <span id="hudTimeDisplay"><i class="fa-regular fa-clock me-1"></i> --:--:--</span>
+                </div>
+
+                <!-- Botón de Captura de Instantánea -->
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="text-info small fw-bold" style="letter-spacing: 1px;">
+                        <i class="fa-solid fa-route me-1"></i> RUTA HUD ACTIVA
+                    </span>
+                    <button id="captureSnapshotBtn" class="btn btn-sm btn-outline-warning py-0 px-2" title="Tomar Foto Instantánea con Datos">
+                        <i class="fa-solid fa-camera-retro me-1"></i> Capturar
+                    </button>
+                </div>
+
+                <!-- Velocímetro Principal -->
+                <div class="my-1">
+                    <span id="speedValue" class="speed-display">0.0</span>
+                    <span id="unitDisplay" class="unit-label">km/h</span>
+                </div>
+
+                <!-- Métricas secundarias compactas -->
+                <div class="row text-center g-2 mt-1">
+                    <div class="col-6">
+                        <div class="metric-box py-1">
+                            <small class="text-muted d-block" style="font-size: 0.65rem;">MÁXIMA</small>
+                            <span id="maxSpeed" class="fw-bold text-warning fs-6">0.0</span> <small class="text-muted" style="font-size: 0.65rem;">km/h</small>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="metric-box py-1">
+                            <small class="text-muted d-block" style="font-size: 0.65rem;">PRECISIÓN GPS</small>
+                            <span id="gpsAccuracy" class="fw-bold text-info fs-6">-</span> <small class="text-muted" style="font-size: 0.65rem;">m</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Alerta de estado -->
+                <div id="statusAlert" class="text-muted mt-2 mb-0" style="font-size: 0.7rem;">
+                    Estado: Dashcam y GPS listos.
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Canvas oculto para procesar la fotografía con sello de datos -->
+    <canvas id="snapshotCanvas" style="display: none;"></canvas>
+
+    <!-- Google Maps JavaScript API (Reemplaza TU_GOOGLE_MAPS_API_KEY con tu clave real) -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=TU_GOOGLE_MAPS_API_KEY"></script>
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        let map;
+        let flightPath = null;
+        let routeCoordinates = [];
+        let currentLocationMarker = null;
+        let watchId = null;
+        let mediaStream = null;
+        let cameraActive = false;
+        let maxSpeedValue = 0;
+        const currentUnit = 'kmh';
+
+        const speedValueEl = document.getElementById('speedValue');
+        const maxSpeedEl = document.getElementById('maxSpeed');
+        const gpsAccuracyEl = document.getElementById('gpsAccuracy');
+        const statusAlert = document.getElementById('statusAlert');
+        const toggleCameraBtn = document.getElementById('toggleCameraBtn');
+        const toggleGpsBtn = document.getElementById('toggleGpsBtn');
+        const captureSnapshotBtn = document.getElementById('captureSnapshotBtn');
+        const cameraBackground = document.getElementById('cameraBackground');
+        const hudDateDisplay = document.getElementById('hudDateDisplay');
+        const hudTimeDisplay = document.getElementById('hudTimeDisplay');
+        const snapshotCanvas = document.getElementById('snapshotCanvas');
+
+        // Actualizar reloj en tiempo real
+        setInterval(() => {
+            const now = new Date();
+            hudDateDisplay.innerHTML = `<i class="fa-regular fa-calendar me-1"></i> ${now.toLocaleDateString('es-AR')}`;
+            hudTimeDisplay.innerHTML = `<i class="fa-regular fa-clock me-1"></i> ${now.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+        }, 1000);
+
+        // Inicializar Google Maps con estilo transparente (eliminando calles, etiquetas y fondos)
+        function initMap() {
+            const transparentStyle = [
+                { elementType: "geometry", stylers: [{ visibility: "off" }] },
+                { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+                { elementType: "labels.text.fill", stylers: [{ visibility: "off" }] },
+                { elementType: "labels.text.stroke", stylers: [{ visibility: "off" }] },
+                { featureType: "administrative", elementType: "geometry", stylers: [{ visibility: "off" }] },
+                { featureType: "poi", stylers: [{ visibility: "off" }] },
+                { featureType: "road", stylers: [{ visibility: "off" }] },
+                { featureType: "transit", stylers: [{ visibility: "off" }] },
+                { featureType: "water", stylers: [{ visibility: "off" }] }
+            ];
+
+            const mapOptions = {
+                zoom: 17,
+                center: { lat: -27.915, lng: -55.742 }, // Coordenadas iniciales de referencia
+                disableDefaultUI: true, // Quita controles, zoom y barra de navegación
+                styles: transparentStyle,
+                backgroundColor: 'transparent'
+            };
+
+            map = new google.maps.Map(document.getElementById('mapOverlay'), mapOptions);
+
+            // Configurar la línea del recorrido (Polyline) brillante estilo HUD
+            flightPath = new google.maps.Polyline({
+                path: routeCoordinates,
+                geodesic: true,
+                strokeColor: '#00ffcc',
+                strokeOpacity: 0.9,
+                strokeWeight: 6
+            });
+
+            flightPath.setMap(map);
+        }
+
+        // Cargar mapa al iniciar la página
+        window.onload = initMap;
+
+        // Control de la cámara trasera (Dashcam)
+        toggleCameraBtn.addEventListener('click', async () => {
+            if (!cameraActive) {
+                try {
+                    mediaStream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: { ideal: "environment" } },
+                        audio: false
+                    });
+                    cameraBackground.srcObject = mediaStream;
+                    await cameraBackground.play();
+                    cameraActive = true;
+                    toggleCameraBtn.className = "btn btn-sm btn-warning fw-bold shadow";
+                    toggleCameraBtn.innerHTML = '<i class="fa-solid fa-camera-slash me-1"></i> Apagar Cámara';
+                } catch (err) {
+                    console.error(err);
+                    alert("No se pudo acceder a la cámara. Revisa los permisos.");
+                }
+            } else {
+                if (mediaStream) {
+                    mediaStream.getTracks().forEach(track => track.stop());
+                }
+                cameraBackground.srcObject = null;
+                cameraActive = false;
+                toggleCameraBtn.className = "btn btn-sm btn-info fw-bold shadow";
+                toggleCameraBtn.innerHTML = '<i class="fa-solid fa-camera me-1"></i> Cámara Dashcam';
+            }
+        });
+
+        // Control del GPS y trazado de ruta en tiempo real
+        toggleGpsBtn.addEventListener('click', () => {
+            if (watchId === null) {
+                if (!navigator.geolocation) {
+                    alert("El navegador no soporta geolocalización.");
+                    return;
+                }
+                statusAlert.textContent = "Buscando señal de satélites GPS...";
+                toggleGpsBtn.className = "btn btn-sm btn-danger fw-bold shadow";
+                toggleGpsBtn.innerHTML = '<i class="fa-solid fa-stop me-1"></i> Detener GPS';
+
+                watchId = navigator.geolocation.watchPosition((position) => {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+                    const speedMs = position.coords.speed !== null ? position.coords.speed : 0;
+                    const speedKmh = speedMs * 3.6;
+
+                    speedValueEl.textContent = speedKmh.toFixed(1);
+                    if (position.coords.accuracy) {
+                        gpsAccuracyEl.textContent = Math.round(position.coords.accuracy);
+                    }
+
+                    if (speedKmh > maxSpeedValue) {
+                        maxSpeedValue = speedKmh;
+                        maxSpeedEl.textContent = maxSpeedValue.toFixed(1);
+                    }
+
+                    const latLng = new google.maps.LatLng(lat, lng);
+                    map.setCenter(latLng);
+                    
+                    // Agregar punto al recorrido de la ruta
+                    routeCoordinates.push(latLng);
+                    flightPath.setPath(routeCoordinates);
+
+                    statusAlert.textContent = "GPS conectado: Trazando ruta sobre Dashcam.";
+                }, (error) => {
+                    statusAlert.textContent = "Error al obtener señal GPS.";
+                    stopGps();
+                }, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
+
+            } else {
+                stopGps();
+            }
+        });
+
+        function stopGps() {
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+            toggleGpsBtn.className = "btn btn-sm btn-success fw-bold shadow";
+            toggleGpsBtn.innerHTML = '<i class="fa-solid fa-play me-1"></i> Iniciar Ruta GPS';
+            statusAlert.textContent = "GPS detenido.";
+            speedValueEl.textContent = "0.0";
+        }
+
+        // Captura de foto instantánea con sello superpuesto
+        captureSnapshotBtn.addEventListener('click', async () => {
+            if (!cameraActive) {
+                alert("Debes activar la cámara de fondo antes de capturar.");
+                return;
+            }
+
+            const video = cameraBackground;
+            const width = video.videoWidth || 1080;
+            const height = video.videoHeight || 1920;
+
+            snapshotCanvas.width = width;
+            snapshotCanvas.height = height;
+            const ctx = snapshotCanvas.getContext('2d');
+
+            // 1. Dibujar fotograma de la cámara de fondo
+            ctx.drawImage(video, 0, 0, width, height);
+
+            // 2. Dibujar cuadro inferior con sello de datos
+            const boxWidth = width - 80;
+            const boxHeight = 200;
+            const boxX = 40;
+            const boxY = height - boxHeight - 50;
+
+            ctx.fillStyle = "rgba(18, 18, 18, 0.85)";
+            ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+            ctx.strokeStyle = "rgba(0, 255, 204, 0.6)";
+            ctx.lineWidth = 3;
+            ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+
+            ctx.fillStyle = "#00ffcc";
+            ctx.font = "bold 22px monospace";
+            ctx.fillText("CAMISOLUS RUTA DASHCAM", boxX + 25, boxY + 35);
+
+            const now = new Date();
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 20px monospace";
+            ctx.fillText(`FECHA: ${now.toLocaleDateString('es-AR')}`, boxX + 25, boxY + 75);
+            ctx.fillText(`HORA: ${now.toLocaleTimeString('es-AR')}`, boxX + 25, boxY + 115);
+
+            ctx.fillStyle = "#00ffcc";
+            ctx.font = "bold 42px sans-serif";
+            ctx.fillText(`VEL: ${speedValueEl.textContent} km/h`, boxX + 25, boxY + 170);
+
+            // 3. Compartir o descargar imagen procesada
+            snapshotCanvas.toBlob(async (blob) => {
+                const filename = `Camisolus_Route_${Date.now()}.png`;
+                const file = new File([blob], filename, { type: 'image/png' });
+
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    try {
+                        await navigator.share({ files: [file], title: 'Ruta Dashcam', text: 'Registro de ruta y velocidad.' });
+                        return;
+                    } catch (err) { if (err.name === 'AbortError') return; }
+                }
+
+                const dataURL = snapshotCanvas.toDataURL('image/png');
+                const link = document.createElement('a');
+                link.href = dataURL;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                alert("¡Instantánea de ruta guardada con éxito!");
+            }, 'image/png');
+        });
+    </script>
+</body>
+</html>
